@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environment
+venv/
+env/
+.venv/
+ENV/
+env.bak/
+*.env
+
+# macOS
+.DS_Store
+
+# Flask/Uploads
+instance/
+downloads/
+*.sqlite3
+
+# Logs
+*.log
+
+# VSCode
+.vscode/
+
+# System
+Thumbs.db
+ehthumbs.db
