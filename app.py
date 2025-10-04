@@ -176,7 +176,7 @@ def download_video():
         return jsonify({"error": "Informações incompletas para download."}), 400
 
     try:
-        # Pega o ID do vídeo para usar como nome do arquivo
+        # Pega o ID do vídeo para usar
         id_process = subprocess.run(['yt-dlp', '--get-id', url], capture_output=True, text=True, check=True)
         video_id = id_process.stdout.strip()
         
