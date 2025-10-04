@@ -31,32 +31,132 @@ def get_formats():
         # Filtra os formatos desejados (MP4, com vídeo e áudio)
         # YouTube para alta qualidade separa vídeo e áudio, então vamos pegar os streams de vídeo
         
-        # Encontra o melhor áudio m4a (MP4 audio)
+        # Encontra o melhor áudio m4a (MP4 audio), priorizando original/pt/en
         best_audio = None
-        for f in video_info['formats']:
-            if f.get('acodec') != 'none' and f.get('vcodec') == 'none' and f.get('ext') == 'm4a':
-                if best_audio is None or f.get('abr', 0) > best_audio.get('abr', 0):
-                    best_audio = f
+        preferred_langs = ['pt', 'en', 'original', None]
+        # Primeiro tenta os idiomas preferidos
+        for lang in preferred_langs:
+            for f in video_info['formats']:
+                if (
+                    f.get('acodec') != 'none'
+                    and f.get('vcodec') == 'none'
+                    and f.get('ext') == 'm4a'
+                    and (
+                        f.get('language') == lang
+                        or f.get('language') is None
+                        or f.get('language') == ''
+                        or f.get('language_preference') == lang
+                        or f.get('lang') == lang
+                    )
+                ):
+                    if best_audio is None or f.get('abr', 0) > best_audio.get('abr', 0):
+                        best_audio = f
+            if best_audio:
+                break
+        # Se não achou, pega qualquer m4a
+        if not best_audio:
+            for f in video_info['formats']:
+                if (
+                    f.get('acodec') != 'none'
+                    and f.get('vcodec') == 'none'
+                    and f.get('ext') == 'm4a'
+                ):
+                    if best_audio is None or f.get('abr', 0) > best_audio.get('abr', 0):
+                        best_audio = f
 
-        # Filtra os formatos de vídeo (720p, 1080p, 4k)
+        # Filtra os formatos de vídeo (acima de 360p, apenas H.264/AVC, e que tenham URL)
+        formats_list = []
         resolutions_seen = set()
         for f in video_info['formats']:
-            # Apenas vídeos MP4, sem áudio
-            if f.get('vcodec') != 'none' and f.get('acodec') == 'none' and f.get('ext') == 'mp4':
+            if (
+                f.get('vcodec', '').startswith('avc1')  # Aceita qualquer H.264/AVC
+                and f.get('acodec') == 'none'
+                and f.get('ext') == 'mp4'
+                and f.get('height') and f.get('height') >= 360
+                and 'url' in f  # Só formatos com URL disponível
+            ):
                 height = f.get('height')
-                if height in [720, 1080, 2160] and height not in resolutions_seen:
+                if height not in resolutions_seen:
                     formats_list.append({
                         "format_id": f['format_id'],
                         "resolution": f.get('format_note', f'{height}p')
                     })
                     resolutions_seen.add(height)
 
-        if not formats_list or best_audio is None:
+        # Encontra o melhor áudio m4a (AAC), priorizando original/pt/en
+        best_audio = None
+        preferred_langs = ['pt', 'en', 'original', None]
+        for lang in preferred_langs:
+            for f in video_info['formats']:
+                if (
+                    f.get('acodec') == 'mp4a.40.2'  # Só AAC
+                    and f.get('vcodec') == 'none'
+                    and f.get('ext') == 'm4a'
+                    and (
+                        f.get('language') == lang
+                        or f.get('language') is None
+                        or f.get('language') == ''
+                        or f.get('language_preference') == lang
+                        or f.get('lang') == lang
+                    )
+                ):
+                    if best_audio is None or f.get('abr', 0) > best_audio.get('abr', 0):
+                        best_audio = f
+            if best_audio:
+                break
+        # Se não achou, pega qualquer m4a AAC
+        if not best_audio:
+            for f in video_info['formats']:
+                if (
+                    f.get('acodec') == 'mp4a.40.2'
+                    and f.get('vcodec') == 'none'
+                    and f.get('ext') == 'm4a'
+                ):
+                    if best_audio is None or f.get('abr', 0) > best_audio.get('abr', 0):
+                        best_audio = f
+
+        # Lista todos os áudios m4a disponíveis
+        audio_formats = []
+        for f in video_info['formats']:
+            if (
+                f.get('acodec') != 'none'
+                and f.get('vcodec') == 'none'
+                and f.get('ext') == 'm4a'
+                and 'url' in f
+            ):
+                audio_formats.append({
+                    "format_id": f['format_id'],
+                    "abr": f.get('abr'),
+                    "language": f.get('language') or f.get('lang') or '',
+                    "format_note": f.get('format_note', ''),
+                    "filesize": f.get('filesize'),
+                })
+
+        # Filtra os formatos de vídeo (acima de 360p, apenas H.264/AVC, e que tenham URL)
+        formats_list = []
+        resolutions_seen = set()
+        for f in video_info['formats']:
+            if (
+                f.get('vcodec', '').startswith('avc1')  # Aceita qualquer H.264/AVC
+                and f.get('acodec') == 'none'
+                and f.get('ext') == 'mp4'
+                and f.get('height') and f.get('height') >= 360
+                and 'url' in f  # Só formatos com URL disponível
+            ):
+                height = f.get('height')
+                if height not in resolutions_seen:
+                    formats_list.append({
+                        "format_id": f['format_id'],
+                        "resolution": f.get('format_note', f'{height}p')
+                    })
+                    resolutions_seen.add(height)
+
+        if not formats_list or not audio_formats:
              return jsonify({"error": "Não foram encontrados formatos de alta qualidade para este vídeo."}), 404
 
         return jsonify({
             "formats": sorted(formats_list, key=lambda x: int(x['format_id'])),
-            "audio_format": best_audio,
+            "audio_formats": audio_formats,
             "video_id": video_info.get("id", "video")
         })
 
@@ -98,6 +198,7 @@ def download_video():
             '-f', f'{video_format_id}+{audio_format_id}',
             '--merge-output-format', 'mp4',
             '-o', os.path.join(DOWNLOAD_FOLDER, '%(id)s_%(height)sp.%(ext)s'),
+            '--verbose',
             url
         ]
         subprocess.run(command, check=True, timeout=600) # Timeout de 10 minutos
