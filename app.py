@@ -1,10 +1,15 @@
 import os
 import json
 import subprocess
+import threading
+import uuid
+import time
 from flask import Flask, render_template, request, send_from_directory, jsonify
+from flask_caching import Cache
 
 app = Flask(__name__)
 DOWNLOAD_FOLDER = 'downloads'
+cache = Cache(app, config={'CACHE_TYPE': 'SimpleCache'})
 
 # Garante que a pasta de downloads exista
 os.makedirs(DOWNLOAD_FOLDER, exist_ok=True)
@@ -155,9 +160,9 @@ def get_formats():
              return jsonify({"error": "Não foram encontrados formatos de alta qualidade para este vídeo."}), 404
 
         return jsonify({
-            "formats": sorted(formats_list, key=lambda x: int(x['format_id'])),
-            "audio_formats": audio_formats,
-            "video_id": video_info.get("id", "video")
+            "formats": formats_list,           # lista de formatos de vídeo
+            "audio_format": best_audio,        # objeto do melhor áudio
+            "video_id": video_info.get("id")   # id do vídeo
         })
 
     except subprocess.CalledProcessError:
@@ -176,11 +181,8 @@ def download_video():
         return jsonify({"error": "Informações incompletas para download."}), 400
 
     try:
-        # Pega o ID do vídeo para usar
         id_process = subprocess.run(['yt-dlp', '--get-id', url], capture_output=True, text=True, check=True)
         video_id = id_process.stdout.strip()
-        
-        # Pega a altura para o nome do arquivo
         info_process = subprocess.run(['yt-dlp', '-j', url], capture_output=True, text=True, check=True)
         video_info = json.loads(info_process.stdout)
         height = 'video'
@@ -189,34 +191,63 @@ def download_video():
                 height = f.get('height', 'video')
                 break
 
+        # Gera um task_id único
+        task_id = str(uuid.uuid4())
+        cache.set(task_id, 0)
+        # Inicia o download em background
+        thread = threading.Thread(target=background_download, args=(task_id, url, video_format_id, audio_format_id, video_id, height))
+        thread.start()
+        return jsonify({"task_id": task_id, "filename": f"{video_id}_{height}p.mp4"})
+    except Exception as e:
+        return jsonify({"error": f"Falha no download: {str(e)}"}), 500
+
+def background_download(task_id, url, video_format_id, audio_format_id, video_id, height):
+    try:
         filename = f"{video_id}_{height}p.mp4"
         output_path = os.path.join(DOWNLOAD_FOLDER, filename)
-        
-        # Comando para baixar e juntar o vídeo e áudio escolhidos
         command = [
             'yt-dlp',
             '-f', f'{video_format_id}+{audio_format_id}',
             '--merge-output-format', 'mp4',
+            '--no-playlist',
+            '--no-warnings',
             '-o', os.path.join(DOWNLOAD_FOLDER, '%(id)s_%(height)sp.%(ext)s'),
-            '--verbose',
             url
         ]
-        subprocess.run(command, check=True, timeout=600) # Timeout de 10 minutos
-
-        # Procura o arquivo baixado na pasta de downloads
-        downloaded_file = None
-        for f in os.listdir(DOWNLOAD_FOLDER):
-            if f.startswith(video_id) and f.endswith('.mp4'):
-                downloaded_file = f
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        for line in process.stdout:
+            if '%' in line:
+                percent = None
+                for part in line.split():
+                    if '%' in part:
+                        try:
+                            percent = int(float(part.replace('%','')))
+                        except:
+                            pass
+                if percent is not None:
+                    cache.set(task_id, percent)
+        process.wait()
+        # Aguarda o arquivo aparecer no disco (até 10s)
+        for _ in range(10):
+            if os.path.exists(output_path):
+                cache.set(task_id, 100)
                 break
+            time.sleep(1)
+        else:
+            cache.set(task_id, -1)
+    except Exception:
+        cache.set(task_id, -1)
 
-        if not downloaded_file:
-            return jsonify({"error": "Arquivo não encontrado após o download."}), 404
+@app.route('/api/progress/<task_id>')
+def get_progress(task_id):
+    percent = cache.get(task_id)
+    if percent is None:
+        return jsonify({"progress": 0})
+    return jsonify({"progress": percent})
 
-        return send_from_directory(DOWNLOAD_FOLDER, downloaded_file, as_attachment=True)
-    
-    except Exception as e:
-        return jsonify({"error": f"Falha no download: {str(e)}"}), 500
+@app.route('/api/download-file/<filename>')
+def download_file(filename):
+    return send_from_directory(DOWNLOAD_FOLDER, filename, as_attachment=True)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)

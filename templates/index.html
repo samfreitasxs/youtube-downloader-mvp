@@ -127,21 +127,12 @@
                     throw new Error(errorData.error || 'Falha no download.');
                 }
 
-                // Lógica para forçar o download do arquivo no navegador
-                const blob = await response.blob();
-                const downloadUrl = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.style.display = 'none';
-                a.href = downloadUrl;
-                a.download = `${videoId}_${resolution}.mp4`; // Nome do arquivo
-                document.body.appendChild(a);
-                a.click();
-                window.URL.revokeObjectURL(downloadUrl);
-                a.remove();
-                
+                // Agora espera task_id e filename
+                const data = await response.json();
+                pollProgress(data.task_id, data.filename);
+
             } catch (error) {
                 showError(error.message);
-            } finally {
                 button.innerText = originalText;
                 button.disabled = false;
             }
@@ -156,6 +147,22 @@
         function showError(message) {
             errorMessage.innerText = message;
             errorMessage.classList.remove('hidden');
+        }
+
+        function pollProgress(task_id, filename) {
+            const interval = setInterval(() => {
+                fetch(`/api/progress/${task_id}`)
+                    .then(res => res.json())
+                    .then(data => {
+                        // Atualize a barra de progresso aqui
+                        if (data.progress >= 100) {
+                            clearInterval(interval);
+                            setTimeout(() => {
+                                window.location = `/api/download-file/${filename}`;
+                            }, 2000); // espera 2 segundos
+                        }
+                    });
+            }, 2000); // a cada 2 segundos
         }
     </script>
 </body>
