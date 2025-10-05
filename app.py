@@ -126,8 +126,8 @@ def get_formats():
             if (
                 f.get('acodec') != 'none'
                 and f.get('vcodec') == 'none'
-                and f.get('ext') == 'm4a'
                 and 'url' in f
+                and f.get('ext') in ['m4a', 'webm']
             ):
                 audio_formats.append({
                     "format_id": f['format_id'],
@@ -135,6 +135,7 @@ def get_formats():
                     "language": f.get('language') or f.get('lang') or '',
                     "format_note": f.get('format_note', ''),
                     "filesize": f.get('filesize'),
+                    "ext": f.get('ext')
                 })
 
         # Filtra os formatos de vídeo (acima de 360p, apenas H.264/AVC, e que tenham URL)
@@ -160,9 +161,9 @@ def get_formats():
              return jsonify({"error": "Não foram encontrados formatos de alta qualidade para este vídeo."}), 404
 
         return jsonify({
-            "formats": formats_list,           # lista de formatos de vídeo
-            "audio_format": best_audio,        # objeto do melhor áudio
-            "video_id": video_info.get("id")   # id do vídeo
+            "formats": formats_list,
+            "audio_formats": audio_formats,
+            "video_id": video_info.get("id", "video")
         })
 
     except subprocess.CalledProcessError:
